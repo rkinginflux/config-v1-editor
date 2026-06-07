@@ -1,7 +1,7 @@
 # =============================================================================
 # Config-V1 Editor — K8s Manifest
 # Namespace: config-v1
-# Port: 770 (UI), 7701 (API, internal)
+# Port: 1970 (UI), 19701 (API, internal)
 # Backend: Go API that reads/writes influxdb-enterprise ConfigMaps
 # =============================================================================
 ---
@@ -73,7 +73,7 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - port: 770
+  - port: 1970
     targetPort: 770
     protocol: TCP
     name: ui
@@ -105,7 +105,7 @@ spec:
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 770
-          hostPort: 770
+          hostPort: 1970
           protocol: TCP
         - containerPort: 7701
           protocol: TCP
@@ -120,11 +120,23 @@ spec:
           httpGet:
             path: /api/health
             port: 770
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 12
         livenessProbe:
           httpGet:
             path: /api/health
             port: 770
-          initialDelaySeconds: 5
+          initialDelaySeconds: 30
           periodSeconds: 15
+          timeoutSeconds: 2
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 770
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 24
