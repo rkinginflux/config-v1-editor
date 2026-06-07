@@ -1,12 +1,15 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY backend/go.mod backend/main.go ./
+COPY backend/go.mod backend/go.sum backend/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o config-api main.go
 
 FROM nginx:alpine
 
 # Install the Go binary
 COPY --from=builder /app/config-api /usr/local/bin/config-api
+
+# Backend schema (used for dynamic setting catalog + validation)
+COPY backend/settings_schema.json /settings_schema.json
 
 # Frontend
 COPY index.html /usr/share/nginx/html/index.html

@@ -71,6 +71,33 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .toast-error { background:#f8514920; border:1px solid var(--danger); color:var(--danger); }
 @keyframes fadeIn { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
 .empty-state { text-align:center; padding:60px 20px; color:var(--text2); }
+.conn-chip { padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:0.72rem; color:var(--text2); }
+.conn-chip.ok { border-color: var(--accent2); color: var(--accent2); }
+.conn-chip.err { border-color: var(--danger); color: var(--danger); }
+.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:1000; }
+.modal-backdrop.show { display:flex; }
+.modal { width:min(980px, 94vw); max-height:92vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 15px 45px rgba(0,0,0,.45); }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid var(--border); }
+.modal-title { font-size:0.95rem; color:var(--accent2); font-weight:700; }
+.modal-body { padding:14px; display:grid; gap:10px; }
+.conn-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+.field { display:flex; flex-direction:column; gap:4px; }
+.field label { font-size:0.72rem; color:var(--text2); }
+.input, .select, .textarea { background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; font-size:0.8rem; }
+.textarea { min-height:180px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; resize:vertical; }
+.modal-actions { display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--border); padding:10px 14px; }
+.hint { font-size:0.72rem; color:var(--text2); }
+.inline-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.preflight-summary { margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface2); font-size:0.8rem; }
+.finding-critical { color:#ff6b6b; }
+.finding-warn { color:#f2cc60; }
+.findings-list { margin-top:8px; max-height:260px; overflow:auto; font-size:0.78rem; line-height:1.35; }
+.finding-item { padding:6px 8px; border-bottom:1px solid #30363d66; }
+.finding-code { font-family:monospace; color:var(--text2); margin-right:6px; }
+.toolbar-group.toolbar-group { display:flex; gap:6px; align-items:center; }
+.btn-toggle { background:var(--surface2); color:var(--text2); border:1px solid var(--border); padding:7px 10px; border-radius:6px; font-size:0.78rem; cursor:pointer; }
+.btn-toggle.active { border-color:var(--accent2); color:var(--accent2); }
+.small-check { font-size:0.78rem; color:var(--text2); display:flex; align-items:center; gap:6px; }
 @media (max-width:900px) { body { flex-direction:column; } #sidebar { width:100%; min-width:100%; max-height:40vh; } }
 </style>
 </head>
@@ -108,6 +135,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <button class="btn btn-refresh" onclick="loadConfig()">
       🔃 Refresh from Cluster
     </button>
+    <button class="btn btn-refresh" onclick="exportPendingChanges()">
+      ⬇ Export Pending JSON
+    </button>
   </div>
 
   <div class="status-bar">
@@ -120,11 +150,112 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <div id="main">
   <div class="top-bar">
     <h1>InfluxDB Enterprise v1 — Configuration</h1>
+    <span id="connChip" class="conn-chip">connection: unknown</span>
+    <button class="btn btn-refresh" style="padding:8px 10px" onclick="openConnectionModal()">🔌 Connection</button>
+    <div class="toolbar-group">
+      <button id="viewBasicBtn" class="btn-toggle active" onclick="setViewMode('basic')">Basic</button>
+      <button id="viewAdvancedBtn" class="btn-toggle" onclick="setViewMode('advanced')">Advanced</button>
+    </div>
+    <label class="small-check"><input id="highImpactOnly" type="checkbox" onchange="toggleHighImpactOnly()"> High-impact only</label>
     <input class="search-box" id="search" placeholder="Search settings... (e.g. license, cache, TLS)" autofocus>
     <span style="font-size:0.8rem;color:var(--text2);white-space:nowrap"><span id="resultCount">0</span> shown</span>
   </div>
   <div class="content-area" id="content">
     <div class="loading">Loading configuration from cluster...</div>
+  </div>
+</div>
+
+<!-- ==================== CONNECTION MODAL ==================== -->
+<div id="connModal" class="modal-backdrop" onclick="if(event.target===this) closeConnectionModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Cluster Connection</div>
+        <div class="hint">Bootstrap from scratch by pasting kubeconfig admin.conf</div>
+      </div>
+      <button class="btn btn-refresh" style="padding:6px 10px" onclick="closeConnectionModal()">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="inline-row">
+        <label><input type="radio" name="connMode" value="in-cluster" checked onchange="onConnModeChange()"> In-cluster service account</label>
+        <label><input type="radio" name="connMode" value="kubeconfig" onchange="onConnModeChange()"> External kubeconfig (admin.conf)</label>
+      </div>
+
+      <div id="kubeconfigBlock" style="display:none">
+        <div class="field">
+          <label for="kubeconfigInput">Kubeconfig content (paste admin.conf)</label>
+          <textarea id="kubeconfigInput" class="textarea" placeholder="apiVersion: v1&#10;clusters: ..."></textarea>
+        </div>
+        <div class="inline-row">
+          <button class="btn btn-refresh" style="padding:8px 10px" onclick="loadContextsFromKubeconfig()">Load contexts</button>
+          <span class="hint">Use inline data kubeconfig (certificate-authority-data / client-certificate-data).</span>
+        </div>
+      </div>
+
+      <div class="conn-grid">
+        <div class="field">
+          <label for="contextSelect">Context</label>
+          <select id="contextSelect" class="select"></select>
+        </div>
+        <div class="field">
+          <label for="namespaceInput">Namespace</label>
+          <input id="namespaceInput" class="input" value="influxdb-enterprise" />
+        </div>
+        <div class="field">
+          <label for="metaCMInput">Meta ConfigMap</label>
+          <input id="metaCMInput" class="input" value="influxdb-enterprise-meta" />
+        </div>
+        <div class="field">
+          <label for="dataCMInput">Data ConfigMap</label>
+          <input id="dataCMInput" class="input" value="influxdb-enterprise-data" />
+        </div>
+        <div class="field">
+          <label for="metaKeyInput">Meta config key</label>
+          <input id="metaKeyInput" class="input" value="influxdb-meta.conf" />
+        </div>
+        <div class="field">
+          <label for="dataKeyInput">Data config key</label>
+          <input id="dataKeyInput" class="input" value="influxdb.conf" />
+        </div>
+        <div class="field">
+          <label for="metaSTSInput">Meta StatefulSet</label>
+          <input id="metaSTSInput" class="input" value="influxdb-enterprise-meta" />
+        </div>
+        <div class="field">
+          <label for="dataSTSInput">Data StatefulSet</label>
+          <input id="dataSTSInput" class="input" value="influxdb-enterprise-data" />
+        </div>
+      </div>
+      <div class="inline-row">
+        <label><input id="insecureTLSInput" type="checkbox"> Insecure TLS (lab/self-signed)</label>
+      </div>
+      <div id="connTestResult" class="hint">No test run yet.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-refresh" onclick="testConnectionFromModal()">Test connection</button>
+      <button class="btn btn-apply" onclick="saveConnectionFromModal()">Save connection</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PREFLIGHT MODAL ==================== -->
+<div id="preflightModal" class="modal-backdrop" onclick="if(event.target===this) closePreflightModal(false)">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Apply Preflight Summary</div>
+        <div class="hint">Review findings before applying changes</div>
+      </div>
+      <button class="btn btn-refresh" style="padding:6px 10px" onclick="closePreflightModal(false)">Cancel</button>
+    </div>
+    <div class="modal-body">
+      <div id="preflightSummary" class="preflight-summary">No findings.</div>
+      <div id="preflightFindings" class="findings-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-discard" onclick="closePreflightModal(false)">Cancel Apply</button>
+      <button class="btn btn-apply" onclick="closePreflightModal(true)">Proceed Apply</button>
+    </div>
   </div>
 </div>
 
@@ -136,83 +267,26 @@ let currentMode = 'meta';  // 'meta' or 'data'
 let metaSections = [], dataSections = [];
 let stagedChanges = {};    // { "meta": { "section.key": newVal }, "data": {...} }
 let editingKey = null;     // which setting is being edited
+let availableContexts = [];
 const API = '/api';
 
 // ================================================================
 // Config data (descriptions, defaults, env vars — static reference)
 // ================================================================
-const configDocs = {};
-[
-  // Global
-  {s:"global",k:"reporting-disabled",d:"Disable anonymous usage reporting every 24h. No user data transmitted.",def:"false",env:""},
-  {s:"global",k:"hostname",d:"Node hostname. Must be resolvable by all cluster members. Must match TLS cert if HTTPS enabled.",def:"localhost",env:"INFLUXDB_HOSTNAME"},
-  {s:"global",k:"bind-address",d:"RPC service address for inter-node communication and backup/restore.",def:":8088",env:"INFLUXDB_BIND_ADDRESS"},
-  // Enterprise
-  {s:"enterprise",k:"license-key",d:"License key from InfluxPortal. Transmitted to portal.influxdata.com for temporary JSON license.",def:"\"\"",env:"INFLUXDB_ENTERPRISE_LICENSE_KEY"},
-  {s:"enterprise",k:"license-path",d:"Local path to permanent JSON license file for offline/air-gapped instances.",def:"\"\"",env:"INFLUXDB_ENTERPRISE_LICENSE_PATH"},
-  // Meta (on data nodes)
-  {s:"meta",k:"dir",d:"Local directory where data nodes store meta information.",def:"/var/lib/influxdb/meta",env:"INFLUXDB_META_DIR"},
-  {s:"meta",k:"meta-tls-enabled",d:"Use TLS when connecting to meta nodes.",def:"false",env:"INFLUXDB_META_META_TLS_ENABLED"},
-  {s:"meta",k:"meta-insecure-tls",d:"Skip TLS cert validation for meta connections. Useful for self-signed certs.",def:"false",env:"INFLUXDB_META_META_INSECURE_TLS"},
-  {s:"meta",k:"meta-auth-enabled",d:"Enable auth for meta connections. Must match meta node auth-enabled.",def:"false",env:"INFLUXDB_META_META_AUTH_ENABLED"},
-  {s:"meta",k:"meta-internal-shared-secret",d:"JWT shared secret for internal meta API. Must match meta node.",def:"\"\"",env:"INFLUXDB_META_META_INTERNAL_SHARED_SECRET"},
-  {s:"meta",k:"retention-autocreate",d:"Auto-create autogen retention policy on DB creation.",def:"true",env:"INFLUXDB_META_RETENTION_AUTOCREATE"},
-  {s:"meta",k:"logging-enabled",d:"Enable meta service logging on data nodes.",def:"true",env:"INFLUXDB_META_LOGGING_ENABLED"},
-  {s:"meta",k:"password-hash",d:"Password hashing algorithm: bcrypt, pbkdf2-sha256, pbkdf2-sha512.",def:"bcrypt",env:"INFLUXDB_META_PASSWORD_HASH"},
-  {s:"meta",k:"ensure-fips",d:"FIPS 140-2 readiness check on startup.",def:"false",env:"INFLUXDB_META_ENSURE_FIPS"},
-  // Meta node core
-  {s:"meta",k:"https-enabled",d:"Enable HTTPS for meta node communication. Production recommended.",def:"false",env:"INFLUXDB_META_HTTPS_ENABLED"},
-  {s:"meta",k:"https-certificate",d:"Path to SSL certificate for meta HTTPS.",def:"\"\"",env:"INFLUXDB_META_HTTPS_CERTIFICATE"},
-  {s:"meta",k:"https-private-key",d:"Path to SSL private key for meta HTTPS.",def:"\"\"",env:"INFLUXDB_META_HTTPS_PRIVATE_KEY"},
-  {s:"meta",k:"https-insecure-tls",d:"Skip cert validation between meta nodes.",def:"false",env:"INFLUXDB_META_HTTPS_INSECURE_TLS"},
-  {s:"meta",k:"data-use-tls",d:"Use TLS when communicating with data nodes.",def:"false",env:"INFLUXDB_META_DATA_USE_TLS"},
-  {s:"meta",k:"data-insecure-tls",d:"Skip cert validation for data node connections.",def:"false",env:"INFLUXDB_META_DATA_INSECURE_TLS"},
-  // Data storage
-  {s:"data",k:"dir",d:"Directory for TSM data file storage.",def:"/var/lib/influxdb/data",env:"INFLUXDB_DATA_DIR"},
-  {s:"data",k:"wal-dir",d:"Directory for WAL files.",def:"/var/lib/influxdb/wal",env:"INFLUXDB_DATA_WAL_DIR"},
-  {s:"data",k:"trace-logging-enabled",d:"Verbose TSM engine tracing (high overhead).",def:"false",env:"INFLUXDB_DATA_TRACE_LOGGING_ENABLED"},
-  {s:"data",k:"query-log-enabled",d:"Log every query before execution.",def:"true",env:"INFLUXDB_DATA_QUERY_LOG_ENABLED"},
-  {s:"data",k:"wal-fsync-delay",d:"Batch fsync calls. 0s=immediate. 10ms-100ms for non-SSD.",def:"0s",env:"INFLUXDB_DATA_WAL_FSYNC_DELAY"},
-  {s:"data",k:"cache-max-memory-size",d:"Max shard cache in bytes before rejecting writes (HTTP 503).",def:"1000000000",env:"INFLUXDB_DATA_CACHE_MAX_MEMORY_SIZE"},
-  {s:"data",k:"cache-snapshot-memory-size",d:"Cache size threshold to snapshot to TSM.",def:"26214400",env:"INFLUXDB_DATA_CACHE_SNAPSHOT_MEMORY_SIZE"},
-  {s:"data",k:"cache-snapshot-write-cold-duration",d:"Snapshot if no writes for this duration.",def:"10m",env:"INFLUXDB_DATA_CACHE_SNAPSHOT_WRITE_COLD_DURATION"},
-  {s:"data",k:"max-concurrent-compactions",d:"Max concurrent compactions. 0=50% of GOMAXPROCS.",def:"0",env:"INFLUXDB_DATA_CACHE_MAX_CONCURRENT_COMPACTIONS"},
-  {s:"data",k:"compact-throughput",d:"Rate limit for compactions, bytes/sec.",def:"48m",env:"INFLUXDB_DATA_COMPACT_THROUGHPUT"},
-  {s:"data",k:"compact-full-write-cold-duration",d:"Full compaction if no writes for this duration.",def:"4h",env:""},
-  {s:"data",k:"index-version",d:"Index type: inmem (memory) or tsi1 (disk-based, high cardinality).",def:"inmem",env:"INFLUXDB_DATA_INDEX_VERSION"},
-  {s:"data",k:"max-series-per-database",d:"Cap on series per DB. 0=unlimited.",def:"1000000",env:"INFLUXDB_DATA_MAX_SERIES_PER_DATABASE"},
-  {s:"data",k:"max-values-per-tag",d:"Max unique tag values per key. 0=unlimited.",def:"100000",env:"INFLUXDB_DATA_MAX_VALUES_PER_TAG"},
-  // HTTP
-  {s:"http",k:"enabled",d:"Enable the HTTP API endpoint.",def:"true",env:"INFLUXDB_HTTP_ENABLED"},
-  {s:"http",k:"bind-address",d:"HTTP API bind address (client-facing port).",def:":8086",env:"INFLUXDB_HTTP_BIND_ADDRESS"},
-  {s:"http",k:"auth-enabled",d:"Require authentication for HTTP API.",def:"false",env:"INFLUXDB_HTTP_AUTH_ENABLED"},
-  {s:"http",k:"log-enabled",d:"Enable HTTP request logging.",def:"true",env:"INFLUXDB_HTTP_LOG_ENABLED"},
-  {s:"http",k:"flux-enabled",d:"Enable Flux query language support.",def:"false",env:"INFLUXDB_HTTP_FLUX_ENABLED"},
-  {s:"http",k:"https-enabled",d:"Enable HTTPS for client connections.",def:"false",env:"INFLUXDB_HTTP_HTTPS_ENABLED"},
-  {s:"http",k:"https-certificate",d:"Path to SSL cert for client HTTPS.",def:"\"\"",env:"INFLUXDB_HTTP_HTTPS_CERTIFICATE"},
-  {s:"http",k:"https-private-key",d:"Path to SSL private key for client HTTPS.",def:"\"\"",env:"INFLUXDB_HTTP_HTTPS_PRIVATE_KEY"},
-  {s:"http",k:"max-row-limit",d:"Max rows a query can return. 0=unlimited.",def:"0",env:""},
-  {s:"http",k:"max-connection-limit",d:"Max simultaneous HTTP connections. 0=unlimited.",def:"0",env:""},
-  {s:"http",k:"shared-secret",d:"JWT shared secret for internal services (Kapacitor).",def:"\"\"",env:""},
-  {s:"http",k:"max-body-size",d:"Max HTTP request body size in bytes.",def:"25000000",env:""},
-  // Cluster
-  {s:"cluster",k:"https-enabled",d:"Enable HTTPS for inter-node RPC communication.",def:"false",env:""},
-  {s:"cluster",k:"https-certificate",d:"TLS cert for inter-node RPC.",def:"\"\"",env:""},
-  {s:"cluster",k:"https-private-key",d:"TLS private key for inter-node RPC.",def:"\"\"",env:""},
-  {s:"cluster",k:"https-insecure-tls",d:"Skip cert validation between data nodes.",def:"false",env:""},
-  {s:"cluster",k:"max-concurrent-queries",d:"Max concurrent queries. 0=unlimited.",def:"0",env:""},
-  {s:"cluster",k:"query-timeout",d:"Auto-kill queries after this duration. 0s=none.",def:"0s",env:""},
-  {s:"cluster",k:"log-queries-after",d:"Log slow queries exceeding this duration. 0s=disabled.",def:"0s",env:""},
-  {s:"cluster",k:"max-select-point",d:"Max points a SELECT can process. 0=unlimited.",def:"0",env:""},
-  {s:"cluster",k:"max-select-series",d:"Max series a SELECT can process. 0=unlimited.",def:"0",env:""},
-  {s:"cluster",k:"max-select-buckets",d:"Max GROUP BY time() buckets. 0=unlimited.",def:"0",env:""},
-  {s:"cluster",k:"shard-writer-timeout",d:"Timeout for shard write requests.",def:"10s",env:""},
-  {s:"cluster",k:"write-timeout",d:"Timeout for writing to remote node.",def:"30s",env:""},
-  // Hinted handoff
-  {s:"hinted-handoff",k:"dir",d:"Directory for hinted handoff queue.",def:"/var/lib/influxdb/hh",env:""},
-].forEach(doc => {
-  configDocs[doc.s + '.' + doc.k] = doc;
-});
+const configDocs = {}; // key => {d, def, env, type, highImpact, sensitive}
+
+function addSchemaDocs(schemaSettings) {
+  (schemaSettings || []).forEach(doc => {
+    configDocs[doc.section + '.' + doc.key] = {
+      d: doc.description || '',
+      def: (doc.default === undefined ? '' : String(doc.default)),
+      env: doc.env || '',
+      type: doc.type || 'string',
+      highImpact: !!doc.highImpact,
+      sensitive: !!doc.sensitive,
+    };
+  });
+}
 
 // ================================================================
 // API calls
@@ -233,9 +307,14 @@ async function api(path, method='GET', body=null) {
 
 async function loadConfig() {
   try {
-    const [meta, data, pending] = await Promise.all([
-      api('/config/meta'), api('/config/data'), api('/pending')
+    const [meta, data, pending, schemaMeta, schemaData] = await Promise.all([
+      api('/config/meta'), api('/config/data'), api('/pending'), api('/schema/meta'), api('/schema/data')
     ]);
+    // refresh docs map from backend schema
+    Object.keys(configDocs).forEach(k => delete configDocs[k]);
+    addSchemaDocs(schemaMeta.settings || []);
+    addSchemaDocs(schemaData.settings || []);
+
     metaSections = meta.sections;
     dataSections = data.sections;
     stagedChanges = {};
@@ -251,6 +330,133 @@ async function loadConfig() {
   } catch (e) {
     setStatus('error', 'API error: ' + e.message);
     document.getElementById('content').innerHTML = '<div class="loading">⚠ Failed to load: ' + e.message + '<br><small>Is the backend running?</small></div>';
+  }
+}
+
+
+function getConnectionPayload() {
+  const mode = document.querySelector('input[name="connMode"]:checked').value;
+  return {
+    mode,
+    kubeconfig: document.getElementById('kubeconfigInput').value,
+    context: document.getElementById('contextSelect').value,
+    namespace: document.getElementById('namespaceInput').value,
+    metaConfigMap: document.getElementById('metaCMInput').value,
+    dataConfigMap: document.getElementById('dataCMInput').value,
+    metaConfigKey: document.getElementById('metaKeyInput').value,
+    dataConfigKey: document.getElementById('dataKeyInput').value,
+    metaStatefulSet: document.getElementById('metaSTSInput').value,
+    dataStatefulSet: document.getElementById('dataSTSInput').value,
+    insecureTLS: document.getElementById('insecureTLSInput').checked,
+  };
+}
+
+function setContextOptions(contexts, selected='') {
+  availableContexts = contexts || [];
+  const sel = document.getElementById('contextSelect');
+  sel.innerHTML = '';
+  if (!availableContexts.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(default/current context)';
+    sel.appendChild(opt);
+    return;
+  }
+  availableContexts.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  });
+  if (selected && availableContexts.includes(selected)) sel.value = selected;
+}
+
+function setConnChip(ok, text) {
+  const chip = document.getElementById('connChip');
+  chip.className = 'conn-chip ' + (ok ? 'ok' : 'err');
+  chip.textContent = text;
+}
+
+function onConnModeChange() {
+  const mode = document.querySelector('input[name="connMode"]:checked').value;
+  document.getElementById('kubeconfigBlock').style.display = mode === 'kubeconfig' ? 'block' : 'none';
+}
+
+function openConnectionModal() {
+  document.getElementById('connModal').classList.add('show');
+}
+
+function closeConnectionModal() {
+  document.getElementById('connModal').classList.remove('show');
+}
+
+async function loadConnectionStatus() {
+  try {
+    const s = await api('/connection/status');
+    if (!s.configured) {
+      setConnChip(false, 'connection: not configured');
+      return;
+    }
+    const mode = s.mode || 'in-cluster';
+    const modeRadio = document.querySelector('input[name="connMode"][value="' + mode + '"]');
+    if (modeRadio) modeRadio.checked = true;
+    onConnModeChange();
+
+    const t = s.targets || {};
+    document.getElementById('namespaceInput').value = t.namespace || 'influxdb-enterprise';
+    document.getElementById('metaCMInput').value = t.metaConfigMap || 'influxdb-enterprise-meta';
+    document.getElementById('dataCMInput').value = t.dataConfigMap || 'influxdb-enterprise-data';
+    document.getElementById('metaKeyInput').value = t.metaConfigKey || 'influxdb-meta.conf';
+    document.getElementById('dataKeyInput').value = t.dataConfigKey || 'influxdb.conf';
+    document.getElementById('metaSTSInput').value = t.metaStatefulSet || 'influxdb-enterprise-meta';
+    document.getElementById('dataSTSInput').value = t.dataStatefulSet || 'influxdb-enterprise-data';
+    document.getElementById('insecureTLSInput').checked = !!s.insecureTLS;
+    setContextOptions(s.context ? [s.context] : [], s.context || '');
+    setConnChip(!!s.connected, 'connection: ' + mode + (s.context ? ' (' + s.context + ')' : ''));
+    if (!s.connected && s.lastError) {
+      document.getElementById('connTestResult').textContent = 'Last error: ' + s.lastError;
+    }
+  } catch (e) {
+    setConnChip(false, 'connection: status error');
+  }
+}
+
+async function loadContextsFromKubeconfig() {
+  try {
+    const payload = getConnectionPayload();
+    const result = await api('/connection/contexts', 'POST', payload);
+    setContextOptions(result.contexts || [], result.selected || '');
+    document.getElementById('connTestResult').textContent = 'Loaded ' + (result.contexts || []).length + ' context(s).';
+  } catch (e) {
+    document.getElementById('connTestResult').textContent = 'Context load failed: ' + e.message;
+  }
+}
+
+async function testConnectionFromModal() {
+  try {
+    const payload = getConnectionPayload();
+    const result = await api('/connection/test', 'POST', payload);
+    const checks = result.result && result.result.checks ? result.result.checks : {};
+    const ok = Object.values(checks).every(Boolean);
+    document.getElementById('connTestResult').textContent =
+      'Test ' + (ok ? 'passed' : 'partial') + ' | checks=' + JSON.stringify(checks);
+  } catch (e) {
+    document.getElementById('connTestResult').textContent = 'Test failed: ' + e.message;
+  }
+}
+
+async function saveConnectionFromModal() {
+  try {
+    const payload = getConnectionPayload();
+    await api('/connection/config', 'POST', payload);
+    document.getElementById('connTestResult').textContent = 'Saved connection.';
+    await loadConnectionStatus();
+    await loadConfig();
+    closeConnectionModal();
+    toast('✓ Connection saved', 'success');
+  } catch (e) {
+    document.getElementById('connTestResult').textContent = 'Save failed: ' + e.message;
+    toast('✗ Save connection failed: ' + e.message, 'error');
   }
 }
 
@@ -276,13 +482,39 @@ function isChanged(section, key) {
 }
 
 function getDoc(section, key) {
-  return configDocs[section + '.' + key] || {d:'',def:'',env:''};
+  return configDocs[section + '.' + key] || {d:'',def:'',env:'',type:'string',highImpact:false,sensitive:false};
 }
 
 // ================================================================
 // RENDERING
 // ================================================================
 let searchTerm = '';
+let viewMode = 'basic'; // basic|advanced
+let highImpactOnly = false;
+let preflightResolve = null;
+
+function isBasicSetting(sectionName, key, doc) {
+  if (doc.highImpact) return true;
+  const basicKeys = new Set([
+    'auth-enabled','https-enabled','https-certificate','https-private-key','license-key','license-path',
+    'meta-tls-enabled','meta-auth-enabled','meta-internal-shared-secret','shared-secret','internal-shared-secret',
+    'password-hash','ensure-fips','dir','wal-dir','index-version','query-timeout','max-concurrent-queries'
+  ]);
+  const basicSections = new Set(['global','enterprise','http','cluster','meta','data','logging']);
+  return basicSections.has(sectionName) && basicKeys.has(key);
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  document.getElementById('viewBasicBtn').classList.toggle('active', mode === 'basic');
+  document.getElementById('viewAdvancedBtn').classList.toggle('active', mode === 'advanced');
+  render();
+}
+
+function toggleHighImpactOnly() {
+  highImpactOnly = document.getElementById('highImpactOnly').checked;
+  render();
+}
 
 function render() {
   const sections = getSections();
@@ -324,8 +556,10 @@ function render() {
   mergedSections.forEach(section => {
     // Filter settings for search
     const filtered = section.settings.filter(s => {
-      if (!searchTerm) return true;
       const doc = getDoc(section.name, s.key);
+      if (viewMode === 'basic' && !isBasicSetting(section.name, s.key, doc)) return false;
+      if (highImpactOnly && !doc.highImpact) return false;
+      if (!searchTerm) return true;
       return s.key.toLowerCase().includes(searchTerm) ||
              s.value.toLowerCase().includes(searchTerm) ||
              section.name.toLowerCase().includes(searchTerm) ||
@@ -347,7 +581,7 @@ function render() {
       html += '<div class="setting' + (editMode ? ' editing' : '') + (changed ? ' changed' : '') + (inherited ? ' inherited' : '') + '" onclick="startEdit(\'' + section.name + '\',\'' + s.key + '\')" id="setting-' + section.name + '-' + s.key + '">';
       html += '<div class="s-label">';
       html += '<div class="s-name">' + s.key + (changed ? '<span class="badge badge-changed">edited</span>' : '') + (inherited ? '<span class="badge" style="background:#30363d40;color:var(--text2)">default</span>' : '') + '</div>';
-      html += '<div class="s-meta">default: ' + doc.def + (doc.env ? ' | $' + doc.env : '') + '</div>';
+      html += '<div class="s-meta">default: ' + doc.def + (doc.env ? ' | $' + doc.env : '') + (doc.type ? ' | type: ' + doc.type : '') + (doc.highImpact ? ' | ⚠ high-impact' : '') + '</div>';
       html += '</div>';
       html += '<div class="s-desc">' + doc.d + '</div>';
       if (editMode) {
@@ -508,15 +742,67 @@ async function discardAll() {
   }
 }
 
+function openPreflightModal(result) {
+  const modal = document.getElementById('preflightModal');
+  const summary = document.getElementById('preflightSummary');
+  const findingsEl = document.getElementById('preflightFindings');
+  const sum = result.summary || {critical:0,warn:0};
+  summary.innerHTML = 'Validated: <b>' + (result.validated || 0) + '</b> | Critical: <b class="finding-critical">' + (sum.critical || 0) + '</b> | Warnings: <b class="finding-warn">' + (sum.warn || 0) + '</b>';
+
+  const findings = result.findings || [];
+  if (!findings.length) {
+    findingsEl.innerHTML = '<div class="finding-item">No findings. Safe to proceed.</div>';
+  } else {
+    findingsEl.innerHTML = findings.map(f => {
+      const cls = f.severity === 'critical' ? 'finding-critical' : 'finding-warn';
+      return '<div class="finding-item"><span class="finding-code">' + (f.code || 'FINDING') + '</span><span class="' + cls + '">[' + f.severity + ']</span> ' + f.message + '</div>';
+    }).join('');
+  }
+  modal.classList.add('show');
+}
+
+function closePreflightModal(proceed) {
+  document.getElementById('preflightModal').classList.remove('show');
+  if (preflightResolve) {
+    const fn = preflightResolve;
+    preflightResolve = null;
+    fn(!!proceed);
+  }
+}
+
+async function runApplyPreflight(configType, changes) {
+  const payload = {
+    changes: Object.entries(changes).map(([k,v]) => {
+      const parts = k.split('.');
+      return { section: parts[0], key: parts.slice(1).join('.'), value: v };
+    })
+  };
+  const r = await api('/config/' + configType + '/preflight', 'POST', payload);
+  const findings = r.findings || [];
+  if (!findings.length) return true;
+
+  openPreflightModal(r);
+  return await new Promise(resolve => {
+    preflightResolve = resolve;
+  });
+}
+
 async function applyChanges() {
   const changes = stagedChanges[currentMode] || {};
   if (!Object.keys(changes).length) return;
 
   try {
+    const ok = await runApplyPreflight(currentMode, changes);
+    if (!ok) {
+      toast('Apply canceled by user after preflight warnings', 'error');
+      return;
+    }
+
     // Submit each change to the API
     for (const [key, value] of Object.entries(changes)) {
       const parts = key.split('.');
       const section = parts[0], settingKey = parts.slice(1).join('.');
+      // server-side validation runs on update endpoint
       await api('/config/' + currentMode + '/update', 'PUT', {section, key: settingKey, value});
     }
 
@@ -530,6 +816,24 @@ async function applyChanges() {
   } catch (e) {
     toast('✗ Apply failed: ' + e.message, 'error');
   }
+}
+
+function exportPendingChanges() {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    mode: currentMode,
+    changes: stagedChanges,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'config-v1-pending-' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('Exported pending changes JSON', 'success');
 }
 
 async function restartPods() {
@@ -577,11 +881,13 @@ document.getElementById('search').addEventListener('input', e => {
   render();
 });
 
-// Initial load
-loadConfig();
-
-// Auto-refresh every 30s to check for external changes
-setInterval(loadConfig, 30000);
+async function boot() {
+  await loadConnectionStatus();
+  await loadConfig();
+  setInterval(loadConfig, 30000);
+}
+onConnModeChange();
+boot();
 </script>
 </body>
 </html>
