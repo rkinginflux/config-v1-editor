@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InfluxDB Enterprise v1 — Config Editor</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+  --text: #c9d1d9; --text2: #8b949e; --accent: #22adf6; --accent2: #00d09e;
+  --danger: #f85149; --warn: #d29922; --code-bg: #1c2128;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:var(--bg); color:var(--text); line-height:1.6; display:flex; min-height:100vh; }
+#sidebar { width:320px; min-width:320px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+.sidebar-header { padding:16px; border-bottom:1px solid var(--border); }
+.sidebar-header h2 { font-size:1rem; color:var(--accent2); }
+.sidebar-header .sub { font-size:0.75rem; color:var(--text2); margin-top:2px; }
+.node-selector { display:flex; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); }
+.node-btn { flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--surface2); color:var(--text2); cursor:pointer; font-size:0.8rem; text-align:center; transition:all .15s; }
+.node-btn.active { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.changes-panel { flex:1; overflow-y:auto; padding:12px; }
+.changes-panel h3 { font-size:0.8rem; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+.change-item { background:var(--surface2); border:1px solid var(--warn); border-radius:6px; padding:8px 10px; margin-bottom:6px; font-size:0.78rem; font-family:monospace; position:relative; }
+.change-item .ci-key { color:var(--accent2); font-weight:600; }
+.change-item .ci-val { color:var(--warn); display:block; margin-top:2px; }
+.change-item .ci-section { color:var(--accent); font-size:0.7rem; }
+.change-item .ci-discard { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--danger); cursor:pointer; font-size:1rem; line-height:1; padding:0 4px; }
+.change-item .ci-discard:hover { color:#ff6b6b; }
+.sidebar-actions { padding:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:6px; }
+.btn { padding:10px 16px; border:none; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:600; transition:all .15s; display:flex; align-items:center; justify-content:center; gap:6px; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn-apply { background:var(--accent2); color:#0d1117; }
+.btn-apply:hover:not(:disabled) { background:#00e6ae; }
+.btn-restart { background:#8957e5; color:#fff; }
+.btn-restart:hover:not(:disabled) { background:#9b6ef7; }
+.btn-discard { background:var(--danger); color:#fff; }
+.btn-discard:hover:not(:disabled) { background:#ff6b6b; }
+.btn-refresh { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+.btn-refresh:hover { border-color:var(--accent); }
+.status-bar { padding:8px 12px; font-size:0.72rem; color:var(--text2); border-top:1px solid var(--border); display:flex; justify-content:space-between; }
+.status-bar .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px; }
+.dot-ok { background:var(--accent2); }
+.dot-changed { background:var(--warn); }
+.dot-error { background:var(--danger); }
+#main { flex:1; display:flex; flex-direction:column; }
+.top-bar { padding:12px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.top-bar h1 { font-size:1.1rem; color:var(--accent2); flex:1; min-width:200px; }
+.search-box { padding:8px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:0.85rem; outline:none; width:280px; }
+.search-box:focus { border-color:var(--accent); }
+.content-area { flex:1; overflow-y:auto; padding:20px 24px; }
+.section { margin-bottom:32px; }
+.section h2 { color:var(--accent); font-size:1rem; margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+.setting { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-bottom:6px; display:flex; align-items:flex-start; gap:12px; cursor:pointer; transition:all .15s; }
+.setting:hover { border-color:var(--accent); }
+.setting.editing { border-color:var(--warn); background:#1a1408; }
+.setting.changed { border-color:var(--warn); }
+.setting .s-label { min-width:200px; max-width:260px; flex-shrink:0; }
+.setting .s-name { font-family:'SF Mono','Fira Code',monospace; font-size:0.84rem; font-weight:600; color:var(--accent2); }
+.setting .s-meta { font-size:0.7rem; color:var(--text2); margin-top:2px; }
+.setting .s-desc { flex:1; font-size:0.8rem; color:var(--text2); line-height:1.4; }
+.setting .s-value { font-family:monospace; font-size:0.8rem; background:var(--code-bg); padding:4px 10px; border-radius:4px; color:var(--accent); white-space:nowrap; flex-shrink:0; }
+.setting .s-edit-input { font-family:monospace; font-size:0.8rem; background:var(--code-bg); border:1px solid var(--warn); border-radius:4px; color:var(--warn); padding:4px 10px; width:200px; outline:none; }
+.badge { padding:1px 6px; border-radius:3px; font-size:0.65rem; font-weight:600; margin-left:4px; display:inline-block; }
+.badge-changed { background:#d2992220; color:var(--warn); }
+.badge-meta { background:#8957e520; color:#bc8cff; }
+.badge-data { background:#1f6feb20; color:#58a6ff; }
+.loading { text-align:center; padding:40px; color:var(--text2); }
+.toast { position:fixed; bottom:20px; right:20px; padding:12px 20px; border-radius:8px; font-size:0.85rem; z-index:999; animation:fadeIn .3s; box-shadow:0 4px 12px rgba(0,0,0,.4); }
+.toast-success { background:#00d09e20; border:1px solid var(--accent2); color:var(--accent2); }
+.toast-error { background:#f8514920; border:1px solid var(--danger); color:var(--danger); }
+@keyframes fadeIn { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+.empty-state { text-align:center; padding:60px 20px; color:var(--text2); }
+@media (max-width:900px) { body { flex-direction:column; } #sidebar { width:100%; min-width:100%; max-height:40vh; } }
+</style>
+</head>
+<body>
+
+<!-- ==================== SIDEBAR ==================== -->
+<div id="sidebar">
+  <div class="sidebar-header">
+    <h2>🛠 Config Editor</h2>
+    <div class="sub">InfluxDB Enterprise v1.12.3</div>
+  </div>
+
+  <div class="node-selector">
+    <button class="node-btn active" data-node="meta">Meta Nodes</button>
+    <button class="node-btn" data-node="data">Data Nodes</button>
+  </div>
+
+  <div class="changes-panel">
+    <h3>📝 Staged Changes</h3>
+    <div id="changesList">
+      <div class="empty-state" style="padding:20px;font-size:0.8rem">No changes staged.<br>Click a setting on the right to edit.</div>
+    </div>
+  </div>
+
+  <div class="sidebar-actions">
+    <button class="btn btn-apply" id="btnApply" disabled onclick="applyChanges()">
+      ⚡ Apply to ConfigMap
+    </button>
+    <button class="btn btn-restart" id="btnRestart" disabled onclick="restartPods()">
+      🔄 Restart Pods
+    </button>
+    <button class="btn btn-discard" id="btnDiscardAll" disabled onclick="discardAll()">
+      🗑 Discard All Changes
+    </button>
+    <button class="btn btn-refresh" onclick="loadConfig()">
+      🔃 Refresh from Cluster
+    </button>
+  </div>
+
+  <div class="status-bar">
+    <span><span class="dot" id="statusDot"></span><span id="statusText">Loading...</span></span>
+    <span id="changeCount">0 changes</span>
+  </div>
+</div>
+
+<!-- ==================== MAIN ==================== -->
+<div id="main">
+  <div class="top-bar">
+    <h1>InfluxDB Enterprise v1 — Configuration</h1>
+    <input class="search-box" id="search" placeholder="Search settings... (e.g. license, cache, TLS)" autofocus>
+    <span style="font-size:0.8rem;color:var(--text2);white-space:nowrap"><span id="resultCount">0</span> shown</span>
+  </div>
+  <div class="content-area" id="content">
+    <div class="loading">Loading configuration from cluster...</div>
+  </div>
+</div>
+
+<script>
+// ================================================================
+// STATE
+// ================================================================
+let currentMode = 'meta';  // 'meta' or 'data'
+let metaSections = [], dataSections = [];
+let stagedChanges = {};    // { "meta": { "section.key": newVal }, "data": {...} }
+let editingKey = null;     // which setting is being edited
+const API = '/api';
+
+// ================================================================
+// Config data (descriptions, defaults, env vars — static reference)
+// ================================================================
+const configDocs = {};
+[
+  // Global
+  {s:"global",k:"reporting-disabled",d:"Disable anonymous usage reporting every 24h. No user data transmitted.",def:"false",env:""},
+  {s:"global",k:"hostname",d:"Node hostname. Must be resolvable by all cluster members. Must match TLS cert if HTTPS enabled.",def:"localhost",env:"INFLUXDB_HOSTNAME"},
+  {s:"global",k:"bind-address",d:"RPC service address for inter-node communication and backup/restore.",def:":8088",env:"INFLUXDB_BIND_ADDRESS"},
+  // Enterprise
+  {s:"enterprise",k:"license-key",d:"License key from InfluxPortal. Transmitted to portal.influxdata.com for temporary JSON license.",def:"\"\"",env:"INFLUXDB_ENTERPRISE_LICENSE_KEY"},
+  {s:"enterprise",k:"license-path",d:"Local path to permanent JSON license file for offline/air-gapped instances.",def:"\"\"",env:"INFLUXDB_ENTERPRISE_LICENSE_PATH"},
+  // Meta (on data nodes)
+  {s:"meta",k:"dir",d:"Local directory where data nodes store meta information.",def:"/var/lib/influxdb/meta",env:"INFLUXDB_META_DIR"},
+  {s:"meta",k:"meta-tls-enabled",d:"Use TLS when connecting to meta nodes.",def:"false",env:"INFLUXDB_META_META_TLS_ENABLED"},
+  {s:"meta",k:"meta-insecure-tls",d:"Skip TLS cert validation for meta connections. Useful for self-signed certs.",def:"false",env:"INFLUXDB_META_META_INSECURE_TLS"},
+  {s:"meta",k:"meta-auth-enabled",d:"Enable auth for meta connections. Must match meta node auth-enabled.",def:"false",env:"INFLUXDB_META_META_AUTH_ENABLED"},
+  {s:"meta",k:"meta-internal-shared-secret",d:"JWT shared secret for internal meta API. Must match meta node.",def:"\"\"",env:"INFLUXDB_META_META_INTERNAL_SHARED_SECRET"},
+  {s:"meta",k:"retention-autocreate",d:"Auto-create autogen retention policy on DB creation.",def:"true",env:"INFLUXDB_META_RETENTION_AUTOCREATE"},
+  {s:"meta",k:"logging-enabled",d:"Enable meta service logging on data nodes.",def:"true",env:"INFLUXDB_META_LOGGING_ENABLED"},
+  {s:"meta",k:"password-hash",d:"Password hashing algorithm: bcrypt, pbkdf2-sha256, pbkdf2-sha512.",def:"bcrypt",env:"INFLUXDB_META_PASSWORD_HASH"},
+  {s:"meta",k:"ensure-fips",d:"FIPS 140-2 readiness check on startup.",def:"false",env:"INFLUXDB_META_ENSURE_FIPS"},
+  // Meta node core
+  {s:"meta",k:"https-enabled",d:"Enable HTTPS for meta node communication. Production recommended.",def:"false",env:"INFLUXDB_META_HTTPS_ENABLED"},
+  {s:"meta",k:"https-certificate",d:"Path to SSL certificate for meta HTTPS.",def:"\"\"",env:"INFLUXDB_META_HTTPS_CERTIFICATE"},
+  {s:"meta",k:"https-private-key",d:"Path to SSL private key for meta HTTPS.",def:"\"\"",env:"INFLUXDB_META_HTTPS_PRIVATE_KEY"},
+  {s:"meta",k:"https-insecure-tls",d:"Skip cert validation between meta nodes.",def:"false",env:"INFLUXDB_META_HTTPS_INSECURE_TLS"},
+  {s:"meta",k:"data-use-tls",d:"Use TLS when communicating with data nodes.",def:"false",env:"INFLUXDB_META_DATA_USE_TLS"},
+  {s:"meta",k:"data-insecure-tls",d:"Skip cert validation for data node connections.",def:"false",env:"INFLUXDB_META_DATA_INSECURE_TLS"},
+  // Data storage
+  {s:"data",k:"dir",d:"Directory for TSM data file storage.",def:"/var/lib/influxdb/data",env:"INFLUXDB_DATA_DIR"},
+  {s:"data",k:"wal-dir",d:"Directory for WAL files.",def:"/var/lib/influxdb/wal",env:"INFLUXDB_DATA_WAL_DIR"},
+  {s:"data",k:"trace-logging-enabled",d:"Verbose TSM engine tracing (high overhead).",def:"false",env:"INFLUXDB_DATA_TRACE_LOGGING_ENABLED"},
+  {s:"data",k:"query-log-enabled",d:"Log every query before execution.",def:"true",env:"INFLUXDB_DATA_QUERY_LOG_ENABLED"},
+  {s:"data",k:"wal-fsync-delay",d:"Batch fsync calls. 0s=immediate. 10ms-100ms for non-SSD.",def:"0s",env:"INFLUXDB_DATA_WAL_FSYNC_DELAY"},
+  {s:"data",k:"cache-max-memory-size",d:"Max shard cache in bytes before rejecting writes (HTTP 503).",def:"1000000000",env:"INFLUXDB_DATA_CACHE_MAX_MEMORY_SIZE"},
+  {s:"data",k:"cache-snapshot-memory-size",d:"Cache size threshold to snapshot to TSM.",def:"26214400",env:"INFLUXDB_DATA_CACHE_SNAPSHOT_MEMORY_SIZE"},
+  {s:"data",k:"cache-snapshot-write-cold-duration",d:"Snapshot if no writes for this duration.",def:"10m",env:"INFLUXDB_DATA_CACHE_SNAPSHOT_WRITE_COLD_DURATION"},
+  {s:"data",k:"max-concurrent-compactions",d:"Max concurrent compactions. 0=50% of GOMAXPROCS.",def:"0",env:"INFLUXDB_DATA_CACHE_MAX_CONCURRENT_COMPACTIONS"},
+  {s:"data",k:"compact-throughput",d:"Rate limit for compactions, bytes/sec.",def:"48m",env:"INFLUXDB_DATA_COMPACT_THROUGHPUT"},
+  {s:"data",k:"compact-full-write-cold-duration",d:"Full compaction if no writes for this duration.",def:"4h",env:""},
+  {s:"data",k:"index-version",d:"Index type: inmem (memory) or tsi1 (disk-based, high cardinality).",def:"inmem",env:"INFLUXDB_DATA_INDEX_VERSION"},
+  {s:"data",k:"max-series-per-database",d:"Cap on series per DB. 0=unlimited.",def:"1000000",env:"INFLUXDB_DATA_MAX_SERIES_PER_DATABASE"},
+  {s:"data",k:"max-values-per-tag",d:"Max unique tag values per key. 0=unlimited.",def:"100000",env:"INFLUXDB_DATA_MAX_VALUES_PER_TAG"},
+  // HTTP
+  {s:"http",k:"enabled",d:"Enable the HTTP API endpoint.",def:"true",env:"INFLUXDB_HTTP_ENABLED"},
+  {s:"http",k:"bind-address",d:"HTTP API bind address (client-facing port).",def:":8086",env:"INFLUXDB_HTTP_BIND_ADDRESS"},
+  {s:"http",k:"auth-enabled",d:"Require authentication for HTTP API.",def:"false",env:"INFLUXDB_HTTP_AUTH_ENABLED"},
+  {s:"http",k:"log-enabled",d:"Enable HTTP request logging.",def:"true",env:"INFLUXDB_HTTP_LOG_ENABLED"},
+  {s:"http",k:"flux-enabled",d:"Enable Flux query language support.",def:"false",env:"INFLUXDB_HTTP_FLUX_ENABLED"},
+  {s:"http",k:"https-enabled",d:"Enable HTTPS for client connections.",def:"false",env:"INFLUXDB_HTTP_HTTPS_ENABLED"},
+  {s:"http",k:"https-certificate",d:"Path to SSL cert for client HTTPS.",def:"\"\"",env:"INFLUXDB_HTTP_HTTPS_CERTIFICATE"},
+  {s:"http",k:"https-private-key",d:"Path to SSL private key for client HTTPS.",def:"\"\"",env:"INFLUXDB_HTTP_HTTPS_PRIVATE_KEY"},
+  {s:"http",k:"max-row-limit",d:"Max rows a query can return. 0=unlimited.",def:"0",env:""},
+  {s:"http",k:"max-connection-limit",d:"Max simultaneous HTTP connections. 0=unlimited.",def:"0",env:""},
+  {s:"http",k:"shared-secret",d:"JWT shared secret for internal services (Kapacitor).",def:"\"\"",env:""},
+  {s:"http",k:"max-body-size",d:"Max HTTP request body size in bytes.",def:"25000000",env:""},
+  // Cluster
+  {s:"cluster",k:"https-enabled",d:"Enable HTTPS for inter-node RPC communication.",def:"false",env:""},
+  {s:"cluster",k:"https-certificate",d:"TLS cert for inter-node RPC.",def:"\"\"",env:""},
+  {s:"cluster",k:"https-private-key",d:"TLS private key for inter-node RPC.",def:"\"\"",env:""},
+  {s:"cluster",k:"https-insecure-tls",d:"Skip cert validation between data nodes.",def:"false",env:""},
+  {s:"cluster",k:"max-concurrent-queries",d:"Max concurrent queries. 0=unlimited.",def:"0",env:""},
+  {s:"cluster",k:"query-timeout",d:"Auto-kill queries after this duration. 0s=none.",def:"0s",env:""},
+  {s:"cluster",k:"log-queries-after",d:"Log slow queries exceeding this duration. 0s=disabled.",def:"0s",env:""},
+  {s:"cluster",k:"max-select-point",d:"Max points a SELECT can process. 0=unlimited.",def:"0",env:""},
+  {s:"cluster",k:"max-select-series",d:"Max series a SELECT can process. 0=unlimited.",def:"0",env:""},
+  {s:"cluster",k:"max-select-buckets",d:"Max GROUP BY time() buckets. 0=unlimited.",def:"0",env:""},
+  {s:"cluster",k:"shard-writer-timeout",d:"Timeout for shard write requests.",def:"10s",env:""},
+  {s:"cluster",k:"write-timeout",d:"Timeout for writing to remote node.",def:"30s",env:""},
+  // Hinted handoff
+  {s:"hinted-handoff",k:"dir",d:"Directory for hinted handoff queue.",def:"/var/lib/influxdb/hh",env:""},
+].forEach(doc => {
+  configDocs[doc.s + '.' + doc.k] = doc;
+});
+
+// ================================================================
+// API calls
+// ================================================================
+async function api(path, method='GET', body=null) {
+  const opts = {method, headers:{}};
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(r.status + ': ' + txt);
+  }
+  return r.json();
+}
+
+async function loadConfig() {
+  try {
+    const [meta, data, pending] = await Promise.all([
+      api('/config/meta'), api('/config/data'), api('/pending')
+    ]);
+    metaSections = meta.sections;
+    dataSections = data.sections;
+    stagedChanges = {};
+    if (pending.changes && pending.changes.forEach) {
+      pending.changes.forEach(c => {
+        if (!stagedChanges[c.type]) stagedChanges[c.type] = {};
+        stagedChanges[c.type][c.section + '.' + c.key] = c.value;
+      });
+    }
+    updateSidebar();
+    render();
+    setStatus('ok', 'Connected');
+  } catch (e) {
+    setStatus('error', 'API error: ' + e.message);
+    document.getElementById('content').innerHTML = '<div class="loading">⚠ Failed to load: ' + e.message + '<br><small>Is the backend running?</small></div>';
+  }
+}
+
+function getSections() {
+  return currentMode === 'meta' ? metaSections : dataSections;
+}
+
+function getCurrentValue(section, key) {
+  const changeKey = section + '.' + key;
+  if (stagedChanges[currentMode] && stagedChanges[currentMode][changeKey] !== undefined) {
+    return stagedChanges[currentMode][changeKey];
+  }
+  const sections = getSections();
+  const sec = sections.find(s => s.name === section);
+  if (!sec) return '';
+  const setting = sec.settings.find(s => s.key === key);
+  return setting ? setting.value : '';
+}
+
+function isChanged(section, key) {
+  const changeKey = section + '.' + key;
+  return stagedChanges[currentMode] && stagedChanges[currentMode][changeKey] !== undefined;
+}
+
+function getDoc(section, key) {
+  return configDocs[section + '.' + key] || {d:'',def:'',env:''};
+}
+
+// ================================================================
+// RENDERING
+// ================================================================
+let searchTerm = '';
+
+function render() {
+  const sections = getSections();
+  const container = document.getElementById('content');
+  if (!sections.length) {
+    container.innerHTML = '<div class="loading">No configuration found. Try Refresh.</div>';
+    return;
+  }
+
+  // Build a lookup of what's already in the live config: section -> set of keys
+  const liveKeys = {};
+  sections.forEach(s => {
+    liveKeys[s.name] = new Set(s.settings.map(st => st.key));
+  });
+
+  // Merge static doc entries that match existing sections but aren't in the live config
+  const mergedSections = JSON.parse(JSON.stringify(sections)); // deep copy
+  const addedKeys = {};
+  Object.entries(configDocs).forEach(([lookupKey, doc]) => {
+    const parts = lookupKey.split('.');
+    const section = parts[0], key = parts.slice(1).join('.');
+    // Only add if the section exists in live config AND the key is NOT already there
+    if (liveKeys[section] && !liveKeys[section].has(key)) {
+      let sec = mergedSections.find(s => s.name === section);
+      if (!sec) {
+        sec = { name: section, settings: [] };
+        mergedSections.push(sec);
+      }
+      if (!addedKeys[section]) addedKeys[section] = new Set();
+      if (!addedKeys[section].has(key)) {
+        sec.settings.push({ section: section, key: key, value: doc.def, _inherited: true });
+        addedKeys[section].add(key);
+      }
+    }
+  });
+
+  let total = 0;
+  let html = '';
+  mergedSections.forEach(section => {
+    // Filter settings for search
+    const filtered = section.settings.filter(s => {
+      if (!searchTerm) return true;
+      const doc = getDoc(section.name, s.key);
+      return s.key.toLowerCase().includes(searchTerm) ||
+             s.value.toLowerCase().includes(searchTerm) ||
+             section.name.toLowerCase().includes(searchTerm) ||
+             doc.d.toLowerCase().includes(searchTerm) ||
+             doc.env.toLowerCase().includes(searchTerm);
+    });
+    if (!filtered.length) return;
+    total += filtered.length;
+
+    html += '<div class="section">';
+    html += '<h2>[' + section.name + '] <span style="font-size:0.75rem;color:var(--text2);margin-left:8px">' + filtered.length + ' settings</span></h2>';
+    filtered.forEach(s => {
+      const doc = getDoc(section.name, s.key);
+      const val = getCurrentValue(section.name, s.key);
+      const changed = isChanged(section.name, s.key);
+      const inherited = s._inherited && !changed; // showing default because not in ConfigMap
+      const editMode = editingKey === (currentMode + ':' + section.name + ':' + s.key);
+
+      html += '<div class="setting' + (editMode ? ' editing' : '') + (changed ? ' changed' : '') + (inherited ? ' inherited' : '') + '" onclick="startEdit(\'' + section.name + '\',\'' + s.key + '\')" id="setting-' + section.name + '-' + s.key + '">';
+      html += '<div class="s-label">';
+      html += '<div class="s-name">' + s.key + (changed ? '<span class="badge badge-changed">edited</span>' : '') + (inherited ? '<span class="badge" style="background:#30363d40;color:var(--text2)">default</span>' : '') + '</div>';
+      html += '<div class="s-meta">default: ' + doc.def + (doc.env ? ' | $' + doc.env : '') + '</div>';
+      html += '</div>';
+      html += '<div class="s-desc">' + doc.d + '</div>';
+      if (editMode) {
+        html += '<input class="s-edit-input" id="input-' + section.name + '-' + s.key + '" value="' + val.replace(/"/g,'&quot;').replace(/</g,'&lt;') + '" onkeydown="handleEditKey(event,\'' + section.name + '\',\'' + s.key + '\')" onclick="event.stopPropagation()" autofocus>';
+      } else {
+        html += '<div class="s-value" style="' + (inherited ? 'opacity:0.6' : '') + '">' + val + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+
+  document.getElementById('resultCount').textContent = total;
+  container.innerHTML = html;
+
+  if (editingKey) {
+    setTimeout(() => {
+      const parts = editingKey.split(':');
+      const el = document.getElementById('input-' + parts[1] + '-' + parts[2]);
+      if (el) el.focus();
+    }, 50);
+  }
+}
+
+// ================================================================
+// EDITING
+// ================================================================
+function startEdit(section, key) {
+  if (editingKey === (currentMode + ':' + section + ':' + key)) return; // already editing
+  editingKey = currentMode + ':' + section + ':' + key;
+  render();
+}
+
+function stopEdit() {
+  editingKey = null;
+  render();
+}
+
+function commitEdit(section, key) {
+  const input = document.getElementById('input-' + section + '-' + key);
+  if (!input) return;
+  const newVal = input.value.trim();
+  const oldVal = getCurrentValue(section, key);
+
+  // Check if value actually changed from original
+  const sections = getSections();
+  const sec = sections.find(s => s.name === section);
+  const origSetting = sec ? sec.settings.find(s => s.key === key) : null;
+  const origVal = origSetting ? origSetting.value : '';
+
+  if (newVal === origVal) {
+    // Changed back to original — remove from staged
+    const changeKey = section + '.' + key;
+    if (stagedChanges[currentMode] && stagedChanges[currentMode][changeKey]) {
+      delete stagedChanges[currentMode][changeKey];
+      if (!Object.keys(stagedChanges[currentMode]).length) delete stagedChanges[currentMode];
+    }
+  } else if (newVal !== oldVal) {
+    // Stage the change
+    if (!stagedChanges[currentMode]) stagedChanges[currentMode] = {};
+    stagedChanges[currentMode][section + '.' + key] = newVal;
+  }
+
+  editingKey = null;
+  updateSidebar();
+  render();
+}
+
+function handleEditKey(e, section, key) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    commitEdit(section, key);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    stopEdit();
+  }
+}
+
+// Click outside to stop editing
+document.addEventListener('click', function(e) {
+  if (editingKey && !e.target.closest('.setting') && !e.target.closest('.s-edit-input')) {
+    const parts = editingKey.split(':');
+    commitEdit(parts[1], parts[2]);
+  }
+});
+
+// ================================================================
+// SIDEBAR
+// ================================================================
+function updateSidebar() {
+  const list = document.getElementById('changesList');
+  const changes = stagedChanges[currentMode] || {};
+  const keys = Object.keys(changes);
+  const totalAll = (stagedChanges.meta ? Object.keys(stagedChanges.meta).length : 0) + 
+                   (stagedChanges.data ? Object.keys(stagedChanges.data).length : 0);
+
+  document.getElementById('changeCount').textContent = totalAll + ' change' + (totalAll !== 1 ? 's' : '');
+  document.getElementById('btnApply').disabled = keys.length === 0;
+  document.getElementById('btnRestart').disabled = false;
+  document.getElementById('btnDiscardAll').disabled = totalAll === 0;
+
+  if (keys.length === 0) {
+    list.innerHTML = '<div class="empty-state" style="padding:20px;font-size:0.8rem">No changes staged for ' + currentMode + ' nodes.<br>Click a setting on the right to edit.</div>';
+    return;
+  }
+
+  let html = '';
+  keys.forEach(k => {
+    const parts = k.split('.');
+    const section = parts[0], key = parts.slice(1).join('.');
+    html += '<div class="change-item">';
+    html += '<button class="ci-discard" onclick="discardOne(\'' + currentMode + '\',\'' + section + '\',\'' + key + '\')" title="Discard">✕</button>';
+    html += '<span class="ci-section">[' + section + ']</span>';
+    html += '<span class="ci-key">' + key + '</span>';
+    html += '<span class="ci-val">→ ' + changes[k] + '</span>';
+    html += '</div>';
+  });
+
+  // Also show other node type changes
+  const otherMode = currentMode === 'meta' ? 'data' : 'meta';
+  const otherChanges = stagedChanges[otherMode] || {};
+  if (Object.keys(otherChanges).length) {
+    html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border)">';
+    html += '<h3 style="font-size:0.72rem;color:var(--text2);margin-bottom:6px">🔸 ' + otherMode + ' nodes (' + Object.keys(otherChanges).length + ' changes)</h3>';
+    Object.keys(otherChanges).forEach(k => {
+      const parts = k.split('.');
+      html += '<div class="change-item" style="opacity:0.7;border-color:var(--border)">';
+      html += '<span class="ci-section" style="color:var(--text2)">[' + parts[0] + ']</span>';
+      html += '<span class="ci-key" style="color:var(--text2)">' + parts.slice(1).join('.') + '</span>';
+      html += '<span class="ci-val">→ ' + otherChanges[k] + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  list.innerHTML = html;
+}
+
+function discardOne(mode, section, key) {
+  const changeKey = section + '.' + key;
+  if (stagedChanges[mode] && stagedChanges[mode][changeKey]) {
+    delete stagedChanges[mode][changeKey];
+    if (!Object.keys(stagedChanges[mode]).length) delete stagedChanges[mode];
+  }
+  updateSidebar();
+  render();
+}
+
+async function discardAll() {
+  try {
+    await api('/pending/discard', 'POST');
+    stagedChanges = {};
+    updateSidebar();
+    render();
+    toast('All changes discarded', 'success');
+  } catch (e) {
+    toast('Discard failed: ' + e.message, 'error');
+  }
+}
+
+async function applyChanges() {
+  const changes = stagedChanges[currentMode] || {};
+  if (!Object.keys(changes).length) return;
+
+  try {
+    // Submit each change to the API
+    for (const [key, value] of Object.entries(changes)) {
+      const parts = key.split('.');
+      const section = parts[0], settingKey = parts.slice(1).join('.');
+      await api('/config/' + currentMode + '/update', 'PUT', {section, key: settingKey, value});
+    }
+
+    // Apply to ConfigMap
+    const result = await api('/config/' + currentMode + '/apply', 'POST');
+    stagedChanges[currentMode] = {};
+    updateSidebar();
+    render();
+    toast('✓ Applied ' + result.changes + ' change(s) to ' + result.configMap + '. Restart pods to take effect.', 'success');
+    await loadConfig(); // reload to get fresh state
+  } catch (e) {
+    toast('✗ Apply failed: ' + e.message, 'error');
+  }
+}
+
+async function restartPods() {
+  if (!confirm('Restart ' + currentMode + ' node pods? This will cause a brief interruption.')) return;
+
+  try {
+    const result = await api('/restart/' + currentMode, 'POST');
+    toast('🔄 ' + result.note, 'success');
+  } catch (e) {
+    toast('✗ Restart failed: ' + e.message, 'error');
+  }
+}
+
+// ================================================================
+// MISC
+// ================================================================
+function setStatus(state, text) {
+  document.getElementById('statusText').textContent = text;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot dot-' + state;
+}
+
+function toast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// Node selector
+document.querySelectorAll('.node-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.node-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.node;
+    updateSidebar();
+    render();
+  });
+});
+
+// Search
+document.getElementById('search').addEventListener('input', e => {
+  searchTerm = e.target.value.toLowerCase();
+  render();
+});
+
+// Initial load
+loadConfig();
+
+// Auto-refresh every 30s to check for external changes
+setInterval(loadConfig, 30000);
+</script>
+</body>
+</html>
