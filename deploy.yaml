@@ -37,6 +37,11 @@ rules:
 - apiGroups: [""]
   resources: ["configmaps"]
   verbs: ["list", "watch"]
+# Read license secret for header display
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["influxdb-license"]
+  verbs: ["get"]
 # Targeted operations on specific StatefulSets
 - apiGroups: ["apps"]
   resources: ["statefulsets"]

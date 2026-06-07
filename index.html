@@ -49,6 +49,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .search-box { padding:8px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:0.85rem; outline:none; width:280px; }
 .search-box:focus { border-color:var(--accent); }
 .content-area { flex:1; overflow-y:auto; padding:20px 24px; }
+.license-card { margin: 12px 24px 0 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.license-title { font-size: 0.82rem; font-weight: 700; color: var(--accent2); margin-bottom: 6px; }
+.license-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:8px 12px; }
+.license-item { font-size:0.78rem; color:var(--text2); }
+.license-item b { color: var(--text); margin-right: 6px; }
+.license-error { font-size:0.78rem; color: var(--danger); }
 .section { margin-bottom:32px; }
 .section h2 { color:var(--accent); font-size:1rem; margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:6px; }
 .setting { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-bottom:6px; display:flex; align-items:flex-start; gap:12px; cursor:pointer; transition:all .15s; }
@@ -160,6 +166,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <input class="search-box" id="search" placeholder="Search settings... (e.g. license, cache, TLS)" autofocus>
     <span style="font-size:0.8rem;color:var(--text2);white-space:nowrap"><span id="resultCount">0</span> shown</span>
   </div>
+  <div id="licenseCard" class="license-card" style="display:none">
+    <div class="license-title">📄 License Information</div>
+    <div id="licenseInfoBody" class="license-grid"></div>
+  </div>
   <div class="content-area" id="content">
     <div class="loading">Loading configuration from cluster...</div>
   </div>
@@ -268,6 +278,8 @@ let metaSections = [], dataSections = [];
 let stagedChanges = {};    // { "meta": { "section.key": newVal }, "data": {...} }
 let editingKey = null;     // which setting is being edited
 let availableContexts = [];
+let licenseInfo = null;
+let licenseError = '';
 const API = '/api';
 
 // ================================================================
@@ -326,11 +338,76 @@ async function loadConfig() {
     }
     updateSidebar();
     render();
+    renderLicenseHeader();
     setStatus('ok', 'Connected');
   } catch (e) {
     setStatus('error', 'API error: ' + e.message);
     document.getElementById('content').innerHTML = '<div class="loading">⚠ Failed to load: ' + e.message + '<br><small>Is the backend running?</small></div>';
   }
+}
+
+function flattenLicenseFields(node, prefix = '') {
+  const out = [];
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) {
+    node.forEach((item, idx) => {
+      out.push(...flattenLicenseFields(item, prefix ? (prefix + '[' + idx + ']') : ('[' + idx + ']')));
+    });
+    return out;
+  }
+  if (typeof node === 'object') {
+    Object.keys(node).forEach(k => {
+      const p = prefix ? (prefix + '.' + k) : k;
+      out.push(...flattenLicenseFields(node[k], p));
+    });
+    return out;
+  }
+  out.push({ key: prefix, value: String(node) });
+  return out;
+}
+
+function renderLicenseHeader() {
+  const card = document.getElementById('licenseCard');
+  const body = document.getElementById('licenseInfoBody');
+  if (!card || !body) return;
+
+  if (licenseError) {
+    card.style.display = 'block';
+    body.className = 'license-error';
+    body.textContent = 'License info unavailable: ' + licenseError;
+    return;
+  }
+
+  if (!licenseInfo || !licenseInfo.license) {
+    card.style.display = 'none';
+    return;
+  }
+
+  const fields = flattenLicenseFields(licenseInfo.license);
+  if (!fields.length) {
+    card.style.display = 'block';
+    body.className = 'license-error';
+    body.textContent = 'License info loaded, but no displayable fields were found.';
+    return;
+  }
+
+  body.className = 'license-grid';
+  body.innerHTML = fields.map(f => '<div class="license-item"><b>' +
+    f.key.replace(/</g,'&lt;').replace(/>/g,'&gt;') +
+    ':</b>' + f.value.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>').join('');
+  card.style.display = 'block';
+}
+
+async function loadLicenseInfo() {
+  try {
+    const r = await api('/license');
+    licenseInfo = r || null;
+    licenseError = '';
+  } catch (e) {
+    licenseInfo = null;
+    licenseError = e.message;
+  }
+  renderLicenseHeader();
 }
 
 
@@ -896,8 +973,12 @@ document.getElementById('search').addEventListener('input', e => {
 
 async function boot() {
   await loadConnectionStatus();
+  await loadLicenseInfo();
   await loadConfig();
-  setInterval(loadConfig, 30000);
+  setInterval(async () => {
+    await loadConfig();
+    await loadLicenseInfo();
+  }, 30000);
 }
 onConnModeChange();
 boot();

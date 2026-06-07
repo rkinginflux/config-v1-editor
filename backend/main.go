@@ -30,6 +30,7 @@ const (
 	defaultDataKey   = "influxdb.conf"
 	defaultMetaSTS   = "influxdb-enterprise-meta"
 	defaultDataSTS   = "influxdb-enterprise-data"
+	defaultLicenseSecret = "influxdb-license"
 )
 
 type Setting struct {
@@ -1218,6 +1219,95 @@ func discardAllHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "all changes discarded"})
 }
 
+func normalizedKey(k string) string {
+	k = strings.ToLower(strings.TrimSpace(k))
+	k = strings.ReplaceAll(k, "-", "")
+	k = strings.ReplaceAll(k, "_", "")
+	return k
+}
+
+func isSensitiveLicenseField(k string) bool {
+	n := normalizedKey(k)
+	if n == "signature" || n == "licensekey" || n == "key" {
+		return true
+	}
+	return false
+}
+
+func sanitizeLicenseValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		out := map[string]interface{}{}
+		for k, child := range val {
+			if isSensitiveLicenseField(k) {
+				continue
+			}
+			out[k] = sanitizeLicenseValue(child)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(val))
+		for _, child := range val {
+			out = append(out, sanitizeLicenseValue(child))
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func licenseInfoHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := getConnection()
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	secretName := os.Getenv("INFLUXDB_LICENSE_SECRET")
+	if strings.TrimSpace(secretName) == "" {
+		secretName = defaultLicenseSecret
+	}
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/secrets/%s", conn.Targets.Namespace, secretName)
+	body, _, err := k8sRequest(conn, http.MethodGet, path, nil)
+	if err != nil {
+		http.Error(w, "failed to read license secret: "+err.Error(), 500)
+		return
+	}
+
+	var sec struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(body, &sec); err != nil {
+		http.Error(w, "failed to parse secret JSON: "+err.Error(), 500)
+		return
+	}
+
+	b64 := sec.Data["license.json"]
+	if strings.TrimSpace(b64) == "" {
+		http.Error(w, "license.json key missing in secret", 500)
+		return
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		http.Error(w, "failed to decode license.json: "+err.Error(), 500)
+		return
+	}
+
+	var raw interface{}
+	if err := json.Unmarshal(decoded, &raw); err != nil {
+		http.Error(w, "failed to parse license.json: "+err.Error(), 500)
+		return
+	}
+
+	sanitized := sanitizeLicenseValue(raw)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"secret":  secretName,
+		"license": sanitized,
+	})
+}
+
 func loadInClusterMaterial() {
 	tokenBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
 	if err == nil {
@@ -1301,6 +1391,13 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"settings": listSchemaSettings("data"),
 		})
+	}))
+	mux.HandleFunc("/api/license", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "GET required", 405)
+			return
+		}
+		licenseInfoHandler(w, r)
 	}))
 
 	mux.HandleFunc("/api/config/meta", corsMiddleware(func(w http.ResponseWriter, r *http.Request) { getConfigHandler(w, "meta") }))
