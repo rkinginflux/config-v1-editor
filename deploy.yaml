@@ -108,7 +108,7 @@ spec:
       - name: ghcr-pull-secret
       containers:
       - name: config-v1
-        image: ghcr.io/rkinginflux/config-v1-editor:v20260607-122145
+        image: ghcr.io/rkinginflux/config-v1-editor@sha256:73110792c472dd1986e4fa88c62dfa0ac76c039c2c28ce3ec5ba59498510a9dd
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 770
