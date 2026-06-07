@@ -1,0 +1,130 @@
+# =============================================================================
+# Config-V1 Editor — K8s Manifest
+# Namespace: config-v1
+# Port: 770 (UI), 7701 (API, internal)
+# Backend: Go API that reads/writes influxdb-enterprise ConfigMaps
+# =============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: config-v1
+  labels:
+    app: config-v1
+
+---
+# Service account for accessing influxdb-enterprise namespace ConfigMaps
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: config-v1
+  namespace: config-v1
+
+---
+# RBAC: read/write ConfigMaps in influxdb-enterprise
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: config-v1-editor
+  namespace: influxdb-enterprise
+rules:
+# Targeted operations on specific ConfigMaps
+- apiGroups: [""]
+  resources: ["configmaps"]
+  resourceNames: ["influxdb-enterprise-meta", "influxdb-enterprise-data"]
+  verbs: ["get", "update", "patch"]
+# Collection operations (list/watch can't be restricted by resourceNames)
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["list", "watch"]
+# Targeted operations on specific StatefulSets
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  resourceNames: ["influxdb-enterprise-meta", "influxdb-enterprise-data"]
+  verbs: ["get", "update", "patch"]
+# Collection operations (list/watch can't be restricted by resourceNames)
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: config-v1-editor
+  namespace: influxdb-enterprise
+subjects:
+- kind: ServiceAccount
+  name: config-v1
+  namespace: config-v1
+roleRef:
+  kind: Role
+  name: config-v1-editor
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: config-v1
+  namespace: config-v1
+  labels:
+    app: config-v1
+spec:
+  type: ClusterIP
+  ports:
+  - port: 770
+    targetPort: 770
+    protocol: TCP
+    name: ui
+  selector:
+    app: config-v1
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: config-v1
+  namespace: config-v1
+  labels:
+    app: config-v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: config-v1
+  template:
+    metadata:
+      labels:
+        app: config-v1
+    spec:
+      serviceAccountName: config-v1
+      containers:
+      - name: config-v1
+        image: config-v1:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 770
+          hostPort: 770
+          protocol: TCP
+        - containerPort: 7701
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 770
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 770
+          initialDelaySeconds: 5
+          periodSeconds: 15
