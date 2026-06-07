@@ -585,7 +585,15 @@ function render() {
       html += '</div>';
       html += '<div class="s-desc">' + doc.d + '</div>';
       if (editMode) {
-        html += '<input class="s-edit-input" id="input-' + section.name + '-' + s.key + '" value="' + val.replace(/"/g,'&quot;').replace(/</g,'&lt;') + '" onkeydown="handleEditKey(event,\'' + section.name + '\',\'' + s.key + '\')" onclick="event.stopPropagation()" autofocus>';
+        if (doc.type === 'bool' || doc.type === 'boolean') {
+          const boolVal = String(val).toLowerCase() === 'true' ? 'true' : 'false';
+          html += '<select class="s-edit-input" id="input-' + section.name + '-' + s.key + '" onclick="event.stopPropagation()" onchange="commitEdit(\'' + section.name + '\',\'' + s.key + '\')">';
+          html += '<option value="true"' + (boolVal === 'true' ? ' selected' : '') + '>true</option>';
+          html += '<option value="false"' + (boolVal === 'false' ? ' selected' : '') + '>false</option>';
+          html += '</select>';
+        } else {
+          html += '<input class="s-edit-input" id="input-' + section.name + '-' + s.key + '" value="' + val.replace(/"/g,'&quot;').replace(/</g,'&lt;') + '" onkeydown="handleEditKey(event,\'' + section.name + '\',\'' + s.key + '\')" onclick="event.stopPropagation()" autofocus>';
+        }
       } else {
         html += '<div class="s-value" style="' + (inherited ? 'opacity:0.6' : '') + '">' + val + '</div>';
       }
@@ -651,12 +659,17 @@ function commitEdit(section, key) {
 }
 
 function handleEditKey(e, section, key) {
+  const inputEl = document.getElementById('input-' + section + '-' + key);
+  const isSelect = inputEl && inputEl.tagName && inputEl.tagName.toLowerCase() === 'select';
   if (e.key === 'Enter') {
     e.preventDefault();
     commitEdit(section, key);
   } else if (e.key === 'Escape') {
     e.preventDefault();
     stopEdit();
+  } else if (isSelect) {
+    // Prevent accidental typing behavior from doing anything odd in select controls
+    return;
   }
 }
 
